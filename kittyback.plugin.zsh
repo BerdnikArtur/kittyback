@@ -1,5 +1,5 @@
-KITTY_BUFFER="$HOME/.kittyback_imgs/buffer.png"
-KITTY_FINAL="$HOME/.kittyback_imgs/final.png"
+KITTY_BUFFER="/tmp/.kittyback_imgs/buffer.png"
+KITTY_FINAL="$HOME/.config/kitty/background.png"
 KITTY_CONF="$HOME/.config/kitty/kitty.conf"
 PLUGIN_NAME="KittyBack"
 
@@ -74,7 +74,7 @@ load_image() {
 
 darken() {
 	local factor="$1"
-  	"$IM_CMD" "$KITTY_BUFFER" -modulate "$factor",100,100 "$KITTY_BUFFER"
+	"$IM_CMD" "$KITTY_BUFFER" -brightness-contrast "-${factor}x0" "$KITTY_BUFFER"
 }
 
 discolor() {
@@ -102,40 +102,51 @@ check_kitty_socket() {
   	fi
 }
 
-apply() {
+_apply() {
 	check_kitty_socket
+	cp "$KITTY_BUFFER" "$KITTY_FINAL"
 	kitty @ set-background-image "$KITTY_FINAL"
 }
 
 kittyback() {
+	if [[ "$1" == "apply" ]]; then
+		_apply
+		return
+	fi
+
 	local -a darken_opt discolor_opt pixilize_opt
 
 	zparseopts -D -E \
 		d:=darken_opt  -darken:=darken_opt \
         	c:=discolor_opt  -discolor:=discolor_opt  \
-        	p:=pixilize_opt  -pixilize:=pixilize_opt 
+        	p:=pixilize_opt  -pixilize:=pixilize_opt  \
+		D=default_opt  -default=default_opt
 
-	if [[ -z "$1" ]]; then
+	if [[ -z "$1" && -z "${discolor_opt[1]}" && -z "${pixilize_opt[1]}" && -z "${darken_opt[1]}" && -z "$default_opt" ]]; then
 		echo "Usage: kittyback [--darken 100] [--discolor \"#f6f6f6\"] [--pixilize 100] [path_to_image]"
 	        return 1
 	fi
 
-	if [[ ! -d ~/.kittyback_imgs/ ]]; then
-		mkdir ~/.kittyback_imgs/ 
+	if [[ ! -d /tmp/.kittyback_imgs/ ]]; then
+		mkdir /tmp/.kittyback_imgs/ 
 	fi
 
-	load_image "$1"
+	if [[ -z "$input_image" ]]; then
+		input_image="$KITTY_BUFFER"
+	fi
 
-	[[ -n "${discolor_opt[2]}" ]] && discolor "${discolor_opt[2]}"
-	[[ -n "${pixilize_opt[2]}" ]] && pixilize "${pixilize_opt[2]}"
-	[[ -n "${darken_opt[2]}" ]] && darken "${darken_opt[2]}"
-	
-	cp "$KITTY_BUFFER" "$KITTY_FINAL"
+	while [[ "$1" == -* ]]; do shift; done
+	[[ -n "$1" ]] && load_image "$1"
 
-	apply
+	if [[ -n "${default_opt[1]}" ]]; then
+		discolor "#1e1e1e"
+		pixilize "100"
+		darken "10"
+	else
+		[[ -n "${discolor_opt[1]}" ]] && discolor "${discolor_opt[2]}"
+		[[ -n "${pixilize_opt[1]}" ]] && pixilize "${pixilize_opt[2]}"
+		[[ -n "${darken_opt[1]}" ]] && darken "${darken_opt[2]}"
+	fi
 }
 
-
-if [[ -f "$KITTY_FINAL" ]]; then
-	apply
-fi
+typeset -f +H _apply &> /dev/null
