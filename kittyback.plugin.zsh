@@ -1,6 +1,8 @@
-KITTY_BUFFER_INIT_IMG="/tmp/.kittyback_imgs/init_img.png"
-KITTY_BUFFER="/tmp/.kittyback_imgs/buffer.png"
-KITTY_CONF="$HOME/.config/kitty/kitty.conf"
+KITTY_BUFFER_INIT_IMG="/tmp/.kittyback_imgs/init_img.png" #initial image in buffer for reset function
+KITTY_BUFFER="/tmp/.kittyback_imgs/buffer.png" #buffer image
+KITTY_FINAL_IMG="$(realpath "$(dirname "$0")/background.png")" #final image that ends up in background.conf file
+KITTY_CONF="$HOME/.config/kitty/kitty.conf" #default kitty.conf location
+BACKGROUND_CONF="$(realpath "$(dirname "$0")/background.conf")" #custom config thatmust be included in the KITTY_CONF
 PLUGIN_NAME="KittyBack"
 
 if command -v magick &> /dev/null; then
@@ -41,39 +43,34 @@ if ! command -v kitty &> /dev/null; then
 fi
 
 if [[ ! -f "$KITTY_CONF" ]]; then
-  KITTY_CONF=$(find $HOME -name "kitty.conf" -print -quit)
+	KITTY_CONF=$(find $HOME -name "kitty.conf" -print -quit)
     	if [[ -z "$KITTY_CONF" ]]; then
 		echo "kitty.conf not found on your system. Please check the configuration."
     	    	return 1
     	fi
 fi
 
-if ! grep -Eq '^\s*allow_remote_control\s+socket-only' "$KITTY_CONF"; then
-	echo "$PLUGIN_NAME: The kitty remote control is disabled. Do you want to enable it (y/n)?"
-	read -q "REPLY?Your choice: "
-	echo
-	if [[ $REPLY =~ ^[yY]$ ]]; then
-		echo "allow_remote_control socket-only" >> "$KITTY_CONF"
-	    	echo "listen_on unix:/tmp/kitty_remote.sock" >> "$KITTY_CONF"
-	    	echo "Added remote control settings to $KITTY_CONF"
-	else
-		return 1
-	fi
+if [[ ! -f "$BACKGROUND_CONF" ]]; then
+	echo "allow_remote_control socket-only" >> "$BACKGROUND_CONF"
+	echo "listen_on unix:/tmp/kitty_remote.sock" >> "$BACKGROUND_CONF"
 fi
-
-_shift_rgb() {
-	local factor="$1"
-	"$IM_CMD" "$KITTY_BUFFER" -brightness-contrast "-${factor}x0" "$KITTY_BUFFER"
-}
 
 _darken() {
 	local factor="$1"
+	"$IM_CMD" "$KITTY_BUFFER" -brightness-contrast "-${factor}x0" "$KITTY_BUFFER"
+	return 0
+}
+
+_shift_rgb() {
+	local factor="$1"
 	"$IM_CMD" "$KITTY_BUFFER" -evaluate Multiply "$factor" "$KITTY_BUFFER"
+	return 0
 }
 
 _discolor() {
 	local color="$1"
 	"$IM_CMD" "$KITTY_BUFFER" -colorspace Gray \( -clone 0 -fill "$color" -colorize 80 \) -compose Multiply -composite "$KITTY_BUFFER"
+	return 0
 }
 
 _pixelize() {
@@ -86,6 +83,7 @@ _pixelize() {
 		-scale "$scale%" \
 		-resize "${width}x${height}!" \
 		"$KITTY_BUFFER"
+	return 0
 }
 
 _load_image() {
@@ -102,11 +100,28 @@ _load_image() {
 
 	cp "$input" "$KITTY_BUFFER"
 	cp "$input" "$KITTY_BUFFER_INIT_IMG"
-	export KITTY_INIT_IMG="$input"
+	return 0
 }
 
 _reset() {
 	cp "$KITTY_BUFFER_INIT_IMG" "$KITTY_BUFFER"
+	return 0
+}
+
+_check_kitty_config() {
+	if ! grep -Eq "^\s*include\s+$BACKGROUND_CONF" "$KITTY_CONF"; then
+		echo -n "To use the $PLUGIN_NAME you must to include $BACKGROUND_CONF config file in $KITTY_CONF file. Do you want to include it (y/n)?"
+		read -r "REPLY?Your choice: "
+		echo
+		if [[ $REPLY =~ ^[yY]$ ]]; then
+		    	echo "include $BACKGROUND_CONF" >> "$KITTY_CONF"
+		    	echo "Included the $BACKGROUND_CONF config file in $KITTY_CONF"
+			echo "Please restart the terminal"
+		else
+			return 1
+		fi
+	fi
+	return 0
 }
 
 _check_kitty_socket() {
@@ -122,29 +137,42 @@ _check_kitty_socket() {
   		echo "  listen_on unix:tmp/kitty_remote.sock"
   		return 1
   	fi
+	return 0
 }
 
 _preview() {
-	_check_kitty_socket || return 1
-	kitty @ set-background-image "$KITTY_BUFFER" &> /dev/null
+	if [[ -n "$KITTY_BUFFER" ]]; then
+		_check_kitty_socket || return 1
+		kitty @ set-background-image "$KITTY_BUFFER" &> /dev/null
+	else
+		echo "There is no buffer image created yet."
+		return 1
+	fi
+	return 0
 }
 
 _disable_preview() {
 	kitty @ set-background-image none
+	return 0
 }
 
 _apply() {
-	_preview
-
-	if [[ -z "$KITTY_INIT_IMG" ]]; then
-		echo "error: KITTY_INIT_IMG is not set. please load an image first using 'kittyback path/to/image'."
+	if [[ -z "$KITTY_FINAL_IMG" ]]; then
+		echo "error: KITTY_FINAL_IMG is not set. please load an image first using 'kittyback path/to/image'."
 		return 1
 	fi
 
-	cp "$KITTY_BUFFER" "$KITTY_INIT_IMG"
+	if ! grep -Eq "^\s*background_image\s+$KITTY_fINAL_IMG" "$BACKGROUND_CONF"; then
+		echo "background_image $KITTY_FINAL_IMG" >> "$BACKGROUND_CONF"
+	fi
+
+	_preview
+	cp "$KITTY_BUFFER" "$KITTY_FINAL_IMG"
+	return 0
 }
 
 kittyback() {
+	_check_kitty_config
 	if [[ "$1" == "apply" ]]; then
 	        _apply || return 1
 	        return 0
@@ -182,17 +210,19 @@ kittyback() {
 	if [[ -n "${default_opt[1]}" ]]; then
 		_discolor "#1e1e1e"
 		_pixelize "100"
-		_shift_rgb "10"
+		_shift_rgb "0.6"
 	else
 		[[ -n "${discolor_opt[1]}" ]] && _discolor "${discolor_opt[2]}"
 		[[ -n "${pixelize_opt[1]}" ]] && _pixelize "${pixelize_opt[2]}"
 		[[ -n "${darken_opt[1]}" ]] && _darken "${darken_opt[2]}"
-		[[ -n "${shift_rgb_opt[1]}" ]] && _darken "${shift_rgb_opt[2]}"
+		[[ -n "${shift_rgb_opt[1]}" ]] && _shift_rgb "${shift_rgb_opt[2]}"
 	fi
+	return 0
 }
 
 typeset -f +H _apply &> /dev/null
 typeset -f +H _check_kitty_socket &> /dev/null
+typeset -f +H _check_kitty_config &> /dev/null
 typeset -f +H _load_image &> /dev/null
 typeset -f +H _reset &> /dev/null
 typeset -f +H _preview &> /dev/null
